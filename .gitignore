@@ -1,4 +1,4 @@
-.env.local
+.env
 node_modules/
 .DS_Store
 dist/
@@ -8,3 +8,5 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+
+/src/generated/prisma

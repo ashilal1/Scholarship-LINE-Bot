@@ -1,16 +1,3 @@
-import express from 'express';
-import { MainController } from './controllers';
+// サーバーの起動と「ミドルウェアの設定」に専念する
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Middleware
-app.use(express.json());
-
-// Routes
-app.use('/', MainController);
-
-// Start the server
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
+import express from "express";
