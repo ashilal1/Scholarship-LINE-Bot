@@ -1,8 +1,7 @@
 // 回答処理
 
-import { db } from "../firebase";
-import { sendLineReply } from "./line-service";
-import { sendQuestion } from "./question-service";
+import { sendLineReply } from "./line.service";
+import { sendQuestion } from "./question.service";
 
 export async function handleAnswerFlow(
   replyToken: string,

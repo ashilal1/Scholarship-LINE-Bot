@@ -1,10 +1,9 @@
 // 質問送信・開始フロー
 
-import * as admin from "firebase-admin";
-import { db } from "../firebase";
-import { sendLineReply } from "./line-service";
-import { completeApplicationFlow } from "./answer-service";
-import { validateAnswer } from "./validation-service";
+import { prisma } from "../utils/prisma";
+import { sendLineReply } from "./line.service";
+import { completeApplicationFlow } from "./answer.service";
+import { validateAnswer } from "./validation.service";
 
 export async function startApplicationFlow(
   replyToken: string,
@@ -12,7 +11,7 @@ export async function startApplicationFlow(
   scholarshipId: string
 ) {
   //奨学金の情報を取得
-  const scholarshipDoc = await db
+  const scholarshipDoc = await prisma
     .collection("scholarships")
     .doc(scholarshipId)
     .get();
@@ -34,7 +33,7 @@ export async function startApplicationFlow(
   }
 
   // 奨学金に紐づく質問を取得
-  const questionsSnapshot = await db
+  const questionsSnapshot = await prisma
     .collection("scholarships")
     .doc(scholarshipId)
     .collection("question")
@@ -50,7 +49,7 @@ export async function startApplicationFlow(
   const firstQuestionData = firstQuestionDoc.data();
 
   // Firestoreに進行状況を保存
-  await db.collection("state").doc(`${userId}_${scholarshipId}`).set({
+  await prisma.collection("state").doc(`${userId}_${scholarshipId}`).set({
     userId,
     scholarshipId,
     currentQuestionId: firstQuestionDoc.id,
@@ -180,7 +179,7 @@ export async function handleAnswerFlow(
   questionId: string,
   answer: string
 ) {
-  const stateRef = db.collection("state").doc(`${userId}_${scholarshipId}`);
+  const stateRef = prisma.collection("state").doc(`${userId}_${scholarshipId}`);
   const stateDoc = await stateRef.get();
 
   if (!stateDoc.exists) {
@@ -212,7 +211,7 @@ export async function handleAnswerFlow(
   const nextQuestionId = (currentQuestionId + 1).toString();
 
   // 3. 次の質問をFirestoreから取得
-  const nextQuestionRef = db
+  const nextQuestionRef = prisma
     .collection("scholarships")
     .doc(scholarshipId)
     .collection("question")

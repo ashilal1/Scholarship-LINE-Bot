@@ -1,9 +1,9 @@
-import { db } from "../firebase";
-import { sendLineReply } from "./line-service";
+import { sendLineReply } from "./line.service";
+import { prisma } from "../utils/prisma";
 
 export async function interruptionReply(userId: string) {
   // ユーザーの進行中 state を検索
-  const stateQuery = await db
+  const stateQuery = await prisma
     .collection("state")
     .where("userId", "==", userId)
     .where("isSuspend", "==", false)

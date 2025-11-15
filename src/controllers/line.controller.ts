@@ -1,20 +1,19 @@
+import { prisma } from "../utils/prisma";
 import { Request, Response } from "express";
-import { http } from "@google-cloud/functions-framework";
-import { db } from "./firebase";
-import { sendLineReply } from "./services/line-service";
-import { handleAnswerFlow } from "./services/answer-service";
-import { interruptionReply } from "./services/interruption-service";
-import { confirmProgress } from "./services/progress-service";
+import { sendLineReply } from "../services/line.service";
+import { handleAnswerFlow } from "../services/answer.service";
+import { interruptionReply } from "../services/interruption.service";
+import { confirmProgress } from "../services/progress.service";
 import {
   sendQuestion,
   startApplicationFlow,
-} from "./services/question-service";
+} from "../services/question.service";
 import {
   handleScholarshipMenuFromFirestore,
   handleRequiredDocuments,
   handleDefaultReply,
-} from "./services/scholarship-service";
-import { generateScholarshipPDFAndUpload } from "./services/pdf-service";
+} from "../services/scholarship.service";
+import { generateScholarshipPDFAndUpload } from "../services/pdf.service";
 
 http("helloHttp", async (req: Request, res: Response) => {
   try {
@@ -27,7 +26,8 @@ http("helloHttp", async (req: Request, res: Response) => {
     const userMessage = event.message?.text ?? ""; // オプショナルチェイニングevent に message プロパティがあるか？もしあれば、その中に text プロパティがあるか？を順番にチェック
 
     // Firestore保存
-    db.collection("events")
+    prisma
+      .collection("events")
       .add({ ...event, processedAt: new Date() }) // ... スプレッド構文　eventの中身を変更せずに展開する
       .catch((err) => console.error("Firestore保存エラー:", err));
 
@@ -66,7 +66,7 @@ http("helloHttp", async (req: Request, res: Response) => {
       }
 
       // 質問への回答か判断
-      const stateQuery = await db
+      const stateQuery = await prisma
         .collection("state")
         .where("userId", "==", userId)
         .where("isSuspend", "==", false)
@@ -134,7 +134,7 @@ http("helloHttp", async (req: Request, res: Response) => {
         }
 
         // Firestoreから中断中のstateを取得
-        const stateDoc = await db
+        const stateDoc = await prisma
           .collection("state")
           .doc(`${userId}_${scholarshipId}`)
           .get();
@@ -152,7 +152,7 @@ http("helloHttp", async (req: Request, res: Response) => {
         await stateDoc.ref.update({ isSuspend: false });
 
         // 現在の質問を取得して再送信
-        const questionDoc = await db
+        const questionDoc = await prisma
           .collection("scholarships")
           .doc(scholarshipId)
           .collection("question")
@@ -177,7 +177,7 @@ http("helloHttp", async (req: Request, res: Response) => {
         const value = params.get("value");
 
         if (questionId && value) {
-          const stateRef = db
+          const stateRef = prisma
             .collection("state")
             .doc(`${userId}_${scholarshipId}`);
           const stateDoc = await stateRef.get();
@@ -194,7 +194,7 @@ http("helloHttp", async (req: Request, res: Response) => {
           }
 
           // 「これ以上なし」がくるまで同じ質問を繰り返す
-          const questionDoc = await db
+          const questionDoc = await prisma
             .collection("scholarships")
             .doc(scholarshipId)
             .collection("question")
