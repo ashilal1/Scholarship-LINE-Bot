@@ -1,0 +1,228 @@
+import { prisma } from "../utils/prisma";
+import { Request, Response } from "express";
+import { sendLineReply } from "../services/line.service";
+import { handleAnswerFlow } from "../services/answer.service";
+import { interruptionReply } from "../services/interruption.service";
+import { confirmProgress } from "../services/progress.service";
+import {
+  sendQuestion,
+  startApplicationFlow,
+} from "../services/question.service";
+import {
+  handleScholarshipMenuFromFirestore,
+  handleRequiredDocuments,
+  handleDefaultReply,
+} from "../services/scholarship.service";
+import { generateScholarshipPDFAndUpload } from "../services/pdf.service";
+
+http("helloHttp", async (req: Request, res: Response) => {
+  try {
+    const event = req.body.events[0];
+    if (!event || !event.replyToken) {
+      return res.status(200).send("No valid event.");
+    }
+
+    const replyToken = event.replyToken;
+    const userMessage = event.message?.text ?? ""; // オプショナルチェイニングevent に message プロパティがあるか？もしあれば、その中に text プロパティがあるか？を順番にチェック
+
+    // Firestore保存
+    prisma
+      .collection("events")
+      .add({ ...event, processedAt: new Date() }) // ... スプレッド構文　eventの中身を変更せずに展開する
+      .catch((err) => console.error("Firestore保存エラー:", err));
+
+    // メッセージイベントの処理
+    if (event.type === "message" && event.message.type === "text") {
+      const userId = event.source?.userId;
+      if (!userId) {
+        return res.status(200).send("No userId.");
+      }
+
+      // リッチメニューのコマンドか判定
+      // [xxx] がついたものはコマンドとして処理
+      if (userMessage.startsWith("[") && userMessage.endsWith("]")) {
+        const command = userMessage.slice(1, -1);
+        let messages;
+        const userId = event.source.userId;
+
+        console.log("userId:" + userId);
+
+        if (command.includes("奨学金を選ぶ")) {
+          messages = await handleScholarshipMenuFromFirestore();
+        } else if (command.includes("中断する")) {
+          messages = await interruptionReply(userId);
+        } else if (command.includes("必要書類")) {
+          messages = handleRequiredDocuments();
+        } else if (command.includes("提出する")) {
+          await generateScholarshipPDFAndUpload(userId, "cocacola");
+          return res.status(200).send("PDF generation started."); // LINEのWebhookのタイムアウトを防ぐ
+        } else if (command.includes("進捗を見る")) {
+          messages = await confirmProgress(userId);
+        } else {
+          messages = handleDefaultReply(command); // 括弧を外してオウム返し
+        }
+        await sendLineReply(replyToken, messages);
+        return res.status(200).send("Command processed.");
+      }
+
+      // 質問への回答か判断
+      const stateQuery = await prisma
+        .collection("state")
+        .where("userId", "==", userId)
+        .where("isSuspend", "==", false)
+        .limit(1)
+        .get();
+
+      if (!stateQuery.empty) {
+        const stateDoc = stateQuery.docs[0];
+        const stateData = stateDoc.data();
+
+        if (stateData.expectedAnswerType === 1) {
+          // テキスト回答を期待している場合
+          await handleAnswerFlow(
+            replyToken,
+            userId,
+            stateData.scholarshipId,
+            stateData.currentQuestionId,
+            userMessage
+          );
+        } else {
+          // ボタン回答を期待しているのにテキストが来た場合
+          await sendLineReply(replyToken, [
+            { type: "text", text: "ボタンから選択してください。" },
+          ]);
+        }
+        return res.status(200).send("Answer processed.");
+      }
+    }
+
+    // postbackイベントの処理
+    if (event.type === "postback") {
+      const data = event.postback.data;
+      const params = new URLSearchParams(data);
+      const action = params.get("action");
+      const scholarshipId = params.get("scholarshipId");
+      const userId = event.source?.userId;
+
+      console.log("scholarshipId" + scholarshipId);
+
+      if (!userId || !scholarshipId) {
+        // 必要な情報がない場合は早期リターン
+        return res.status(200).send("Missing required params.");
+      }
+
+      if (action === "startApply") {
+        await startApplicationFlow(replyToken, userId, scholarshipId);
+      } else if (action === "answer") {
+        // ★新しい処理：回答を受け取るフローを呼び出す
+        const questionId = params.get("questionId");
+        const value = params.get("value");
+        if (questionId && value) {
+          await handleAnswerFlow(
+            replyToken,
+            userId,
+            scholarshipId,
+            questionId,
+            value
+          );
+        }
+      } else if (action === "resumeApply") {
+        // 中断中の申請を再開する
+        const userId = event.source?.userId;
+        if (!userId || !scholarshipId) {
+          return res.status(200).send("Missing required params.");
+        }
+
+        // Firestoreから中断中のstateを取得
+        const stateDoc = await prisma
+          .collection("state")
+          .doc(`${userId}_${scholarshipId}`)
+          .get();
+
+        if (!stateDoc.exists) {
+          await sendLineReply(replyToken, [
+            { type: "text", text: "再開できる申請が見つかりませんでした。" },
+          ]);
+          return res.status(200).send("No state found");
+        }
+
+        const stateData = stateDoc.data();
+
+        // isSuspendをfalseにして再開状態へ
+        await stateDoc.ref.update({ isSuspend: false });
+
+        // 現在の質問を取得して再送信
+        const questionDoc = await prisma
+          .collection("scholarships")
+          .doc(scholarshipId)
+          .collection("question")
+          .doc(stateData.currentQuestionId)
+          .get();
+
+        if (!questionDoc.exists) {
+          await sendLineReply(replyToken, [
+            { type: "text", text: "再開する質問が見つかりませんでした。" },
+          ]);
+          return res.status(200).send("No question found");
+        }
+
+        // replyTokenは一回限りなので、再度質問を送るにはsendQuestionを直接呼ぶ
+        await sendQuestion(replyToken, scholarshipId, questionDoc, [
+          { type: "text", text: `${scholarshipId}の申請を再開します。` },
+        ]);
+        return res.status(200).send("Resume processed.");
+      } else if (action === "selectanswer") {
+        // 複数選択できる回答の場合の処理
+        const questionId = params.get("questionId");
+        const value = params.get("value");
+
+        if (questionId && value) {
+          const stateRef = prisma
+            .collection("state")
+            .doc(`${userId}_${scholarshipId}`);
+          const stateDoc = await stateRef.get();
+          const stateData = stateDoc.data();
+
+          // 既存の回答を配列で取り出す（なかったら空配列）
+          const currentAnswers: string[] =
+            stateData?.answers?.[questionId] || [];
+
+          if (!currentAnswers.includes(value)) {
+            await stateRef.update({
+              [`answers.${questionId}`]: [...currentAnswers, value],
+            });
+          }
+
+          // 「これ以上なし」がくるまで同じ質問を繰り返す
+          const questionDoc = await prisma
+            .collection("scholarships")
+            .doc(scholarshipId)
+            .collection("question")
+            .doc(questionId)
+            .get();
+
+          await sendQuestion(replyToken, scholarshipId, questionDoc, []);
+        }
+      } else if (action === "selectanserend") {
+        // 複数選択を終了して次の質問に進む
+        const questionId = params.get("questionId");
+
+        if (questionId) {
+          await handleAnswerFlow(
+            replyToken,
+            userId!,
+            scholarshipId,
+            questionId,
+            "END" // ダミー値、実際の回答は selectanswer 側で保存済み
+          );
+        }
+      }
+    }
+
+    console.log(`Unsupported event type: ${event.type}`);
+    return res.status(200).send("OK");
+  } catch (error) {
+    console.error("エラー:", error);
+    return res.status(200).send("Error processing request.");
+  }
+});
