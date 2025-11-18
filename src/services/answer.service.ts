@@ -1,7 +1,8 @@
 // 回答処理
 
 import { sendLineReply } from "./line.service";
-import { sendQuestion } from "./question.service";
+import { sendQuestion } from "./question.servisce";
+import { prisma } from "../utils/prisma";
 
 export async function handleAnswerFlow(
   replyToken: string,
@@ -10,7 +11,7 @@ export async function handleAnswerFlow(
   questionId: string,
   answer: string
 ) {
-  const stateRef = db.collection("state").doc(`${userId}_${scholarshipId}`);
+  const stateRef = prisma.collection("state").doc(`${userId}_${scholarshipId}`);
   const stateDoc = await stateRef.get();
 
   if (!stateDoc.exists) {
@@ -26,7 +27,7 @@ export async function handleAnswerFlow(
 
   const currentQuestionId = parseInt(questionId, 10);
   const nextQuestionId = (currentQuestionId + 1).toString();
-  const nextQuestionDoc = await db
+  const nextQuestionDoc = await prisma
     .collection("scholarships")
     .doc(scholarshipId)
     .collection("question")
@@ -57,7 +58,7 @@ export async function completeApplicationFlow(
     },
   ]);
   // stateを削除または完了済みに更新
-  await db.collection("state").doc(`${userId}_${scholarshipId}`).update({
+  await prisma.collection("state").doc(`${userId}_${scholarshipId}`).update({
     isSuspend: true, // 完了フラグ
   });
 }

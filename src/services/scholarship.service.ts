@@ -1,9 +1,9 @@
 // 奨学金関連のメニュー処理
 
-import { db } from "../firebase";
+import { prisma } from "../utils/prisma";
 
 export async function handleScholarshipMenuFromFirestore(): Promise<any[]> {
-  const citiesRef = db.collection("scholarships");
+  const citiesRef = prisma.collection("scholarships");
   const snapshot = await citiesRef.where("type", "array-contains", "2").get();
 
   console.log(snapshot.docs);

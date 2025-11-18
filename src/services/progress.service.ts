@@ -1,7 +1,7 @@
-import { db } from "../firebase";
+import { prisma } from "../utils/prisma";
 
 export async function confirmProgress(userId: string) {
-  const snapshot = await db
+  const snapshot = await prisma
     .collection("state")
     .where("userId", "==", userId)
     .get();
@@ -14,7 +14,7 @@ export async function confirmProgress(userId: string) {
 
   for (const doc of snapshot.docs) {
     const data = doc.data();
-    const scholarshipDoc = await db
+    const scholarshipDoc = await prisma
       .collection("scholarships")
       .doc(data.scholarshipId)
       .get();
